@@ -43,6 +43,7 @@ static int8_t _int_pin, _reset_pin;
 
 static Adafruit_I2CDevice *i2c_dev = NULL; ///< Pointer to I2C bus interface
 static HardwareSerial *uart_dev = NULL;
+static const uint32_t UART_HAL_READ_TIMEOUT_MS = 250;
 
 static sh2_SensorValue_t *_sensor_value = NULL;
 static bool _reset_occurred = false;
@@ -58,6 +59,7 @@ static int uarthal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
                         uint32_t *t_us);
 static void uarthal_close(sh2_Hal_t *self);
 static int uarthal_open(sh2_Hal_t *self);
+static bool uarthal_wait_for_available(size_t count, uint32_t timeout_ms);
 
 static bool spihal_wait_for_int(void);
 static int spihal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len);
@@ -443,8 +445,8 @@ static int uarthal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
   while (1) {
     yield();
 
-    if (!uart_dev->available()) {
-      continue;
+    if (!uarthal_wait_for_available(1, UART_HAL_READ_TIMEOUT_MS)) {
+      return 0;
     }
     c = uart_dev->read();
     // Serial.print(c, HEX); Serial.print(", ");
@@ -454,12 +456,15 @@ static int uarthal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
   }
 
   // read protocol id
-  while (uart_dev->available() < 2) {
-    yield();
+  if (!uarthal_wait_for_available(1, UART_HAL_READ_TIMEOUT_MS)) {
+    return 0;
   }
   c = uart_dev->read();
   // Serial.print(c, HEX); Serial.print(", ");
   if (c == 0x7E) {
+    if (!uarthal_wait_for_available(1, UART_HAL_READ_TIMEOUT_MS)) {
+      return 0;
+    }
     c = uart_dev->read();
     // Serial.print(c, HEX); Serial.print(", ");
     if (c != 0x01) {
@@ -472,8 +477,8 @@ static int uarthal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
   while (true) {
     yield();
 
-    if (!uart_dev->available()) {
-      continue;
+    if (!uarthal_wait_for_available(1, UART_HAL_READ_TIMEOUT_MS)) {
+      return 0;
     }
     c = uart_dev->read();
     // Serial.print(c, HEX); Serial.print(", ");
@@ -482,11 +487,14 @@ static int uarthal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
     }
     if (c == 0x7D) {
       // escape!
-      while (!uart_dev->available()) {
-        continue;
+      if (!uarthal_wait_for_available(1, UART_HAL_READ_TIMEOUT_MS)) {
+        return 0;
       }
       c = uart_dev->read();
       c ^= 0x20;
+    }
+    if (packet_size >= len) {
+      return 0;
     }
     pBuffer[packet_size] = c;
     packet_size++;
@@ -504,6 +512,19 @@ static int uarthal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len,
   */
 
   return packet_size;
+}
+
+static bool uarthal_wait_for_available(size_t count, uint32_t timeout_ms) {
+  const uint32_t start = millis();
+
+  while (uart_dev->available() < count) {
+    yield();
+    if ((millis() - start) >= timeout_ms) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 static int uarthal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len) {
