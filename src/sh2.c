@@ -68,7 +68,7 @@
 #define PACKED_STRUCT __packed struct
 #endif
 
-#define ADVERT_TIMEOUT_US (200000)
+#define ADVERT_TIMEOUT_US (2000000)
 
 // Command and Subcommand values
 #define SH2_CMD_ERRORS                 1
